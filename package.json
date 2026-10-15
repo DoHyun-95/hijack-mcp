@@ -1,6 +1,6 @@
 {
   "name": "hijack-report-mcp",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "하이잭 학원 사이트 학생 리포트 MCP 서버 (Claude Desktop, Codex, Antigravity 등)",
   "type": "module",
   "main": "index.js",
