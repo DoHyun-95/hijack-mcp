@@ -88,13 +88,14 @@ const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'YYYY-MM-DD 형식이
 // MCP 서버
 // ─────────────────────────────────────────────
 const server = new McpServer(
-    { name: 'hijack-report', version: '0.2.0' },
+    { name: 'hijack-report', version: '0.3.0' },
     {
         instructions: [
             '하이잭 학원 사이트의 학생 데이터(출결, 과제, 영상 시청, OMR 성적, 상담기록)를 조회하고 학생 리포트 초안을 작성하는 도구입니다.',
             '학생을 지정할 때는 먼저 list_students로 mb_id를 확인하세요.',
             '학생 데이터 응답의 analysis 블록을 먼저 보세요: metrics(지표별 이번/이전 기간 값과 변화량), signals(위험 신호), highlights(잘한 점), overall(good=순조로움, watch=점검 권장, alert=관심 필요).',
             '분석·총평에 쓰는 숫자는 analysis와 응답 데이터에 있는 값만 인용하고, 직접 계산하거나 추정하지 마세요.',
+            '시험 성적은 analysis.omr_boards(시험 종류=게시판별)로 보세요. 같은 종류끼리만 비교하고, 서로 다른 종류(예: 모의고사와 단어 테스트)의 점수를 섞어 평균 내거나 비교하지 마세요. 실력 추이는 1차 점수(first_avg) 기준이며, 재시험은 만회 폭(retake_gain)으로 따로 말하세요. metrics.omr_average는 종류가 섞인 값이라 쓰지 마세요.',
             'signals는 원장님·선생님용 정보입니다. 학부모용 총평에는 위험 신호를 그대로 쓰지 말고 개선 방향과 다음 계획으로 순화해 쓰세요.',
             'DATA_UNRECORDED 신호가 있으면 출석률을 신뢰하기 어려우니 출석에 대한 단정적인 평가를 피하세요.',
             '리포트는 초안까지만 만들 수 있습니다. 발행·삭제·알림톡 발송은 원장님/선생님이 관리자 화면에서 직접 합니다.',
