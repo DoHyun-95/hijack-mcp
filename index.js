@@ -88,7 +88,7 @@ const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'YYYY-MM-DD 형식이
 // MCP 서버
 // ─────────────────────────────────────────────
 const server = new McpServer(
-    { name: 'hijack-report', version: '0.4.0' },
+    { name: 'hijack-report', version: '0.5.0' },
     {
         instructions: [
             '하이잭 학원 사이트의 학생 데이터(출결, 과제, 영상 시청, OMR 성적, 상담기록)를 조회하고 학생 리포트 초안을 작성하며, OMR 시험(정답)을 등록하는 도구입니다.',
@@ -104,6 +104,9 @@ const server = new McpServer(
             '등록 순서는 반드시 ① create_omr_exams(dry_run=true)로 검증 → ② 회차별 정답표(번호: 정답)와 warnings/errors를 사용자에게 보여주고 확인받기 → ③ 사용자가 확인한 뒤에만 dry_run=false로 등록입니다. 확인 없이 등록하지 마세요.',
             '정답은 PDF에 있는 문항 번호 그대로 넣고(예: 18~45번), ①②③④⑤는 1~5 숫자로 바꾸세요. 복수 정답은 "1,4", 단답형은 types에 "text"로 표시합니다. 읽기 어려운 문항은 추측하지 말고 사용자에게 물어보세요.',
             '등록한 시험은 이 도구로 수정·삭제할 수 없습니다. 잘못 등록했다면 관리자 화면에서 직접 고치도록 안내하세요.',
+            '선생님 질문 응답: 수업 일정·출결은 get_schedule → get_attendance, 과제는 list_assignments → get_assignment_status, 영상 시청은 get_video_watch, 반 시험 성적은 get_group_omr, 사이트 현황은 get_site_stats를 쓰세요. 반은 list_students의 groups(group_id, group_name)로 찾습니다.',
+            '"안 한 학생"(결석·미제출·미시청) 질문은 대상 학생 목록(반 구성원·과제 대상자)과 기록을 비교해 답하세요. 기록이 없는 학생은 "기록 없음"으로 말하고 결석·미제출로 단정하지 마세요.',
+            '도구로 확인할 수 없는 정보(결제·상담 등)는 추측하지 말고 관리자 화면에서 확인하도록 안내하세요.',
         ].join('\n'),
     },
 );
@@ -248,6 +251,95 @@ registerTool('create_omr_exams', {
     query: { action: 'create-exams' },
     body: { bo_table, exams, dry_run: dry_run !== false },
 }));
+
+// ── 선생님 질문 응답용 조회 도구 (모두 GET, 키 권한과 관리자 메뉴 권한이 그대로 적용됨) ──
+const clip = (v, n = 300) => (typeof v === 'string' && v.length > n ? `${v.slice(0, n)}…` : v);
+
+registerTool('get_schedule', {
+    title: '수업 일정',
+    description: '날짜 기준 하루/주(일~토)/월 수업 일정을 조회합니다. 각 일정의 se_id로 get_attendance를 호출하면 출결을 볼 수 있습니다.',
+    inputSchema: {
+        date: dateSchema.describe('기준 날짜 YYYY-MM-DD'),
+        range: z.enum(['day', 'week', 'month']).optional().describe('기본 day'),
+        group: z.string().optional().describe('반 이름(se_group)으로 필터'),
+    },
+}, async ({ date, range = 'day', group }) => {
+    const [year, month] = date.split('-').map(Number);
+    const query = range === 'month' ? { action: 'month', year, month, group } : { action: range, date, group };
+    const data = await callApi('GET', 'schedule.php', { query });
+    data.events = (data.events || []).map((e) => ({ ...e, se_memo: clip(e.se_memo) }));
+    return data;
+});
+
+registerTool('get_attendance', {
+    title: '수업 출결',
+    description: '수업 일정 한 건(se_id)의 반 학생별 출결(present=출석, absent=결석, late=지각, excused=사유결석, null=기록 없음)을 조회합니다.',
+    inputSchema: { se_id: z.number().int().min(1).describe('get_schedule의 se_id') },
+}, async ({ se_id }) => callApi('GET', 'schedule.php', { query: { action: 'attendance', id: se_id } }));
+
+registerTool('list_assignments', {
+    title: '과제 목록',
+    description: '과제 목록(제목, 대상 반, 마감일, 대상/제출 인원)을 최신순으로 조회합니다. mb_id를 주면 그 학생의 과제와 완료 여부를 봅니다.',
+    inputSchema: {
+        status: z.enum(['active', 'closed']).optional().describe('active=진행중, closed=마감·완료·종료'),
+        mb_id: z.string().optional().describe('특정 학생의 과제만'),
+        page: z.number().int().min(1).optional(),
+    },
+}, async ({ status, mb_id, page }) => {
+    if (mb_id) {
+        return callApi('GET', 'assignment.php', { query: { action: 'student-assignments', mb_id, page, per_page: 50 } });
+    }
+    const data = await callApi('GET', 'assignment.php', { query: { action: 'assignments', status, page, per_page: 50 } });
+    data.assignments = (data.assignments || []).map(({ as_links, as_checklist, as_links_arr, as_content, ...a }) => ({
+        ...a, as_content: clip(as_content),
+    }));
+    return data;
+});
+
+registerTool('get_assignment_status', {
+    title: '과제 완료 현황',
+    description: '과제 한 건의 대상 학생별 완료 여부·완료일·체크리스트 항목 상태를 조회합니다.',
+    inputSchema: { as_id: z.number().int().min(1).describe('list_assignments의 as_id') },
+}, async ({ as_id }) => callApi('GET', 'assignment.php', { query: { action: 'completion-status', as_id } }));
+
+registerTool('get_video_watch', {
+    title: '게시글 영상 시청 기록',
+    description: '게시글 영상 시청 기록을 조회합니다. 인자 없음=시청 기록이 있는 게시판 목록, bo_table=게시글별 시청 요약, bo_table+wr_id=그 게시글을 본 학생별 시청률. 학생 한 명의 시청 기록은 mb_id로 조회합니다.',
+    inputSchema: {
+        bo_table: z.string().optional(),
+        wr_id: z.number().int().min(1).optional(),
+        mb_id: z.string().optional().describe('학생 한 명의 게시글 영상 시청 기록'),
+        search: z.string().optional().describe('게시글 제목 검색 (bo_table만 줄 때)'),
+    },
+}, async ({ bo_table, wr_id, mb_id, search }) => {
+    if (mb_id) return callApi('GET', 'student-grades.php', { query: { action: 'board-video-watch', mb_id } });
+    const mode = !bo_table ? 'boards' : wr_id ? 'viewers' : 'summary';
+    return callApi('GET', 'board-video-watch.php', { query: { mode, bo_table, wr_id, search, per_page: 100 } });
+});
+
+registerTool('get_group_omr', {
+    title: '반별 OMR 성적',
+    description: '반(그룹) 학생들의 OMR 응시 현황과 평균 점수를 조회합니다. 시험 종류(게시판)별로 보려면 bo_table을 주세요. 서로 다른 시험 종류의 점수는 섞어 비교하지 마세요.',
+    inputSchema: {
+        group_id: z.string().min(1).describe('list_students의 groups[].group_id'),
+        bo_table: z.string().optional().describe('시험 종류(게시판). 생략하면 반이 응시한 게시판 목록을 먼저 보여줌'),
+        from: dateSchema.optional(),
+        to: dateSchema.optional(),
+    },
+}, async ({ group_id, bo_table, from, to }) => {
+    if (!bo_table && !from && !to) {
+        return callApi('GET', 'student-grades.php', { query: { action: 'group-omr-boards', group_id } });
+    }
+    return callApi('GET', 'student-grades.php', {
+        query: { action: 'group-omr-summary', group_id, bo_table, from_date: from, to_date: to },
+    });
+});
+
+registerTool('get_site_stats', {
+    title: '사이트 현황',
+    description: '전체 회원 수, 게시글 수, 오늘/누적 방문자, 최근 가입자·게시글 등 사이트 대시보드 통계를 조회합니다.',
+    inputSchema: {},
+}, async () => callApi('GET', 'stats.php', { query: { type: 'dashboard' } }));
 
 await server.connect(new StdioServerTransport());
 console.error(`[hijack-report-mcp] ${SITE_URL} 연결 준비 완료`);
