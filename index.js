@@ -88,10 +88,10 @@ const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'YYYY-MM-DD 형식이
 // MCP 서버
 // ─────────────────────────────────────────────
 const server = new McpServer(
-    { name: 'hijack-report', version: '0.3.0' },
+    { name: 'hijack-report', version: '0.4.0' },
     {
         instructions: [
-            '하이잭 학원 사이트의 학생 데이터(출결, 과제, 영상 시청, OMR 성적, 상담기록)를 조회하고 학생 리포트 초안을 작성하는 도구입니다.',
+            '하이잭 학원 사이트의 학생 데이터(출결, 과제, 영상 시청, OMR 성적, 상담기록)를 조회하고 학생 리포트 초안을 작성하며, OMR 시험(정답)을 등록하는 도구입니다.',
             '학생을 지정할 때는 먼저 list_students로 mb_id를 확인하세요.',
             '학생 데이터 응답의 analysis 블록을 먼저 보세요: metrics(지표별 이번/이전 기간 값과 변화량), signals(위험 신호), highlights(잘한 점), overall(good=순조로움, watch=점검 권장, alert=관심 필요).',
             '분석·총평에 쓰는 숫자는 analysis와 응답 데이터에 있는 값만 인용하고, 직접 계산하거나 추정하지 마세요.',
@@ -100,6 +100,10 @@ const server = new McpServer(
             'DATA_UNRECORDED 신호가 있으면 출석률을 신뢰하기 어려우니 출석에 대한 단정적인 평가를 피하세요.',
             '리포트는 초안까지만 만들 수 있습니다. 발행·삭제·알림톡 발송은 원장님/선생님이 관리자 화면에서 직접 합니다.',
             '상담기록은 민감정보이므로 사용자가 요청했을 때만 include_consultations=true로 조회하세요.',
+            'OMR 시험(정답) 등록: PDF 등에서 정답을 추출해 list_omr_boards로 고른 이 사이트 전용 게시판에 create_omr_exams로 등록합니다.',
+            '등록 순서는 반드시 ① create_omr_exams(dry_run=true)로 검증 → ② 회차별 정답표(번호: 정답)와 warnings/errors를 사용자에게 보여주고 확인받기 → ③ 사용자가 확인한 뒤에만 dry_run=false로 등록입니다. 확인 없이 등록하지 마세요.',
+            '정답은 PDF에 있는 문항 번호 그대로 넣고(예: 18~45번), ①②③④⑤는 1~5 숫자로 바꾸세요. 복수 정답은 "1,4", 단답형은 types에 "text"로 표시합니다. 읽기 어려운 문항은 추측하지 말고 사용자에게 물어보세요.',
+            '등록한 시험은 이 도구로 수정·삭제할 수 없습니다. 잘못 등록했다면 관리자 화면에서 직접 고치도록 안내하세요.',
         ].join('\n'),
     },
 );
@@ -200,6 +204,50 @@ registerTool('update_report_draft', {
     await callApi('PUT', 'report.php', { body: { rp_id, action: 'update', teacher_comment, title } });
     return { rp_id, message: '초안이 수정되었습니다.' };
 });
+
+registerTool('list_omr_boards', {
+    title: 'OMR 게시판 목록',
+    description: '이 사이트에서 시험(정답)을 등록할 수 있는 OMR 게시판과 분류 목록을 조회합니다. bo_table을 주면 그 게시판의 최근 시험 제목을 보여줍니다(회차 이름·중복 확인용). 본사 공용 게시판은 등록할 수 없어 제외합니다.',
+    inputSchema: {
+        bo_table: z.string().optional().describe('최근 시험을 볼 게시판 (생략하면 게시판 목록)'),
+    },
+}, async ({ bo_table }) => {
+    if (bo_table) {
+        const data = await callApi('GET', 'omr.php', { query: { action: 'posts', bo_table } });
+        const exams = (data.posts || []).slice(0, 30)
+            .map(({ wr_id, wr_subject, wr_datetime, participant_count }) => ({ wr_id, wr_subject, wr_datetime, participant_count }));
+        return { bo_table, recent_exams: exams };
+    }
+    const data = await callApi('GET', 'omr.php', { query: { action: 'boards' } });
+    const all = data.boards || [];
+    const boards = all.filter((b) => b.writable).map((b) => ({
+        bo_table: b.bo_table,
+        bo_subject: b.bo_subject,
+        categories: Number(b.bo_use_category) ? (b.bo_category_list || '').split('|').filter(Boolean) : [],
+    }));
+    return { total: boards.length, hq_boards_excluded: all.length - boards.length, boards };
+});
+
+const examSchema = z.object({
+    title: z.string().min(1).max(255).describe('시험 제목 (예: 중2 듣기 Book1 Day5)'),
+    answers: z.record(z.string()).describe('문항 번호 → 정답. 예: {"18":"3","19":"1,4","20":"apple"}'),
+    types: z.record(z.enum(['number', 'text', 'essay'])).optional().describe('객관식이 아닌 문항만 표시. 예: {"20":"text"}'),
+    content: z.string().optional().describe('본문 (생략 시 "문제 18~45")'),
+    ca_name: z.string().optional().describe('분류 (list_omr_boards의 categories 중 하나)'),
+});
+
+registerTool('create_omr_exams', {
+    title: 'OMR 시험(정답) 등록',
+    description: 'OMR 게시판에 시험을 정답과 함께 등록합니다(최대 50개). 기본은 dry_run=true로 저장 없이 검증만 합니다. 사용자가 검증 결과(정답표)를 확인한 뒤에만 dry_run=false로 실제 등록하세요. "초안 + OMR 등록" 권한 키가 필요합니다.',
+    inputSchema: {
+        bo_table: z.string().min(1).describe('list_omr_boards로 확인한 게시판'),
+        exams: z.array(examSchema).min(1).max(50),
+        dry_run: z.boolean().optional().describe('true(기본)=검증만, false=실제 등록'),
+    },
+}, async ({ bo_table, exams, dry_run }) => callApi('POST', 'omr.php', {
+    query: { action: 'create-exams' },
+    body: { bo_table, exams, dry_run: dry_run !== false },
+}));
 
 await server.connect(new StdioServerTransport());
 console.error(`[hijack-report-mcp] ${SITE_URL} 연결 준비 완료`);
