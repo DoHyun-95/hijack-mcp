@@ -89,7 +89,7 @@ const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'YYYY-MM-DD 형식이
 // MCP 서버
 // ─────────────────────────────────────────────
 const server = new McpServer(
-    { name: 'hijack', version: '0.8.0' },
+    { name: 'hijack', version: '0.9.0' },
     {
         instructions: [
             '하이잭 학원 사이트의 학생 데이터(출결, 과제, 영상 시청, OMR 성적, 상담기록)를 조회하고 학생 리포트 초안을 작성하며, OMR 시험(정답)을 등록하고 게시판·수업 일정·출결·과제·팝업·메인 디자인을 관리하는 도구입니다.',
@@ -109,7 +109,8 @@ const server = new McpServer(
             '"안 한 학생"(결석·미제출·미시청) 질문은 대상 학생 목록(반 구성원·과제 대상자)과 기록을 비교해 답하세요. 기록이 없는 학생은 "기록 없음"으로 말하고 결석·미제출로 단정하지 마세요.',
             '게시판 관리: list_boards로 현재 설정을 보고, create_board·update_board는 바꿀 내용(아이디·이름·권한 레벨·분류)을 사용자에게 보여주고 확인받은 뒤에만 호출하세요. 게시판 삭제·스킨 변경은 관리자 화면에서 직접 하도록 안내하세요.',
             '일정·출결·과제·팝업·메인 디자인 쓰기 도구도 실행 전에 바꿀 내용을 사용자에게 보여주고 확인받으세요. 출결 저장은 학부모 알림톡, 과제 생성·휴강은 학생 푸시가 관리자 화면과 똑같이 발송되므로 확인할 때 함께 알려주세요.',
-            '삭제(일정·과제·팝업·이미지)는 이 도구로 할 수 없습니다. 관리자 화면에서 직접 하도록 안내하세요.',
+            '삭제 도구(delete_*, 이미지 삭제)는 최고 관리자 계정의 "전체" 키로만 됩니다. 다른 키로 권한 오류가 나면 관리자 화면에서 직접 하도록 안내하세요.',
+            '삭제는 되돌릴 수 없습니다. 반드시 삭제할 대상(제목·날짜·게시판 이름 등)을 조회해 사용자에게 보여주고, 사용자가 명확히 삭제하라고 한 뒤에만 confirm=true로 호출하세요. 게시판 삭제는 그 안의 글도 모두 사라진다고 꼭 알리세요.',
             '도구로 확인할 수 없는 정보(결제·상담 등)는 추측하지 말고 관리자 화면에서 확인하도록 안내하세요.',
         ].join('\n'),
     },
@@ -581,6 +582,7 @@ const popupFields = {
     height: z.number().int().min(100).max(2000).optional(),
     active: z.boolean().optional().describe('노출 여부'),
 };
+const confirmSchema = z.literal(true).describe('사용자가 삭제를 확인했을 때만 true');
 const toPopupForm = (p) => defined({
     nw_subject: p.subject, nw_content: p.content, nw_link: p.link, nw_device: p.device,
     nw_begin_time: p.begin_time, nw_end_time: p.end_time, nw_width: p.width, nw_height: p.height,
@@ -608,12 +610,16 @@ registerTool('create_popup', {
 registerTool('update_popup', {
     title: '팝업 수정',
     description: '팝업(nw_id)의 제목·내용·링크·노출 기간·크기·활성 여부를 바꿉니다. 준 항목만 바뀌고 이미지는 그대로 둡니다. 바꾸기 전에 사용자에게 확인받으세요. "전체" 권한 키가 필요합니다.',
-    inputSchema: { nw_id: z.number().int().min(1), ...popupFields },
-}, async ({ nw_id, ...changes }) => {
+    inputSchema: {
+        nw_id: z.number().int().min(1), ...popupFields,
+        delete_image: z.boolean().optional().describe('팝업 이미지 삭제 (최고 관리자 키만, 사용자 확인 필요)'),
+    },
+}, async ({ nw_id, delete_image, ...changes }) => {
     const cur = await callApi('GET', 'popup.php', { query: { action: 'detail', id: nw_id } });
     const keep = ['nw_type', 'nw_subject', 'nw_content', 'nw_link', 'nw_device', 'nw_begin_time', 'nw_end_time', 'nw_left',
         'nw_top', 'nw_width', 'nw_height', 'nw_new_window', 'nw_show_logged_in', 'nw_disable_options', 'nw_status'];
     const form = { ...defined(Object.fromEntries(keep.map((k) => [k, cur[k] ?? undefined]))), ...toPopupForm(changes) };
+    if (delete_image) form.delete_image = '1';
     await callApi('POST', 'popup.php', { query: { action: 'update', id: nw_id }, form });
     return { nw_id, changed: toPopupForm(changes), message: '팝업을 수정했습니다.' };
 });
@@ -633,16 +639,65 @@ registerTool('update_main_design', {
         link_1_mobile: z.string().optional(), link_2_mobile: z.string().optional(),
         background_1: z.string().optional().describe('배너 1 배경색 (#ffffff)'),
         background_2: z.string().optional().describe('배너 2 배경색'),
+        delete_images: z.array(z.enum(['main_title_1', 'main_title_2', 'main_img_1', 'main_img_2', 'main_img_1_mobile', 'main_img_2_mobile']))
+            .optional().describe('삭제할 배너 이미지 (최고 관리자 키만, 사용자 확인 필요)'),
     },
 }, async (a) => {
     const form = defined({
         main_default_banner: a.default_banner === undefined ? undefined : (a.default_banner ? '1' : '0'),
         main_link_1: a.link_1, main_link_2: a.link_2, main_link_1_mobile: a.link_1_mobile, main_link_2_mobile: a.link_2_mobile,
         main_background_1: a.background_1, main_background_2: a.background_2,
+        ...Object.fromEntries((a.delete_images || []).map((f) => [`delete_${f}`, '1'])),
     });
     if (Object.keys(form).length === 0) throw new Error('바꿀 항목을 하나 이상 주세요.');
     await callApi('POST', 'main-page-design-update.php', { form });
     return { changed: form, message: '메인 페이지 디자인을 수정했습니다.' };
+});
+
+// ── 삭제 (최고 관리자 계정의 "전체" 키만. 되돌릴 수 없으므로 confirm=true 필수) ──
+registerTool('delete_schedule', {
+    title: '수업 일정 삭제',
+    description: '수업 일정(se_id)과 그 일정의 출결·과제 연결을 삭제합니다. future=true면 반복 일정에서 이 날 이후 같은 묶음을 모두 삭제합니다. 최고 관리자 "전체" 키만 가능합니다.',
+    inputSchema: { se_id: z.number().int().min(1), future: z.boolean().optional(), confirm: confirmSchema },
+}, async ({ se_id, future }) => {
+    await callApi('DELETE', 'schedule.php', { query: { id: se_id, scope: future ? 'future' : undefined } });
+    return { se_id, message: future ? '이 날 이후 반복 일정을 삭제했습니다.' : '일정을 삭제했습니다.' };
+});
+
+registerTool('delete_assignment', {
+    title: '과제 삭제',
+    description: '과제(as_id)와 학생별 완료 기록을 삭제합니다. 최고 관리자 "전체" 키만 가능합니다.',
+    inputSchema: { as_id: z.number().int().min(1), confirm: confirmSchema },
+}, async ({ as_id }) => {
+    await callApi('POST', 'assignment.php', { query: { action: 'delete-assignment' }, body: { as_id } });
+    return { as_id, message: '과제를 삭제했습니다.' };
+});
+
+registerTool('delete_popup', {
+    title: '팝업 삭제',
+    description: '팝업(nw_id)과 이미지 파일을 삭제합니다. 최고 관리자 "전체" 키만 가능합니다.',
+    inputSchema: { nw_id: z.number().int().min(1), confirm: confirmSchema },
+}, async ({ nw_id }) => {
+    await callApi('POST', 'popup.php', { query: { action: 'delete', id: nw_id } });
+    return { nw_id, message: '팝업을 삭제했습니다.' };
+});
+
+registerTool('delete_report', {
+    title: '리포트 삭제',
+    description: '학생 리포트(rp_id)를 삭제합니다. 발행된 리포트도 삭제되어 학부모 링크가 끊깁니다. 최고 관리자 "전체" 키만 가능합니다.',
+    inputSchema: { rp_id: z.number().int().min(1), confirm: confirmSchema },
+}, async ({ rp_id }) => {
+    await callApi('DELETE', 'report.php', { query: { action: 'delete', rp_id } });
+    return { rp_id, message: '리포트를 삭제했습니다.' };
+});
+
+registerTool('delete_board', {
+    title: '게시판 삭제',
+    description: '게시판(bo_table)과 그 안의 모든 글을 삭제합니다(테이블 삭제, 복구 불가). 최고 관리자 "전체" 키만 가능하고, 서버에서 스키마 변경이 허용되어 있어야 합니다.',
+    inputSchema: { bo_table: z.string().regex(/^[a-z0-9_]{1,20}$/), confirm: confirmSchema },
+}, async ({ bo_table }) => {
+    await callApi('DELETE', 'boards.php', { query: { bo_table } });
+    return { bo_table, message: '게시판을 삭제했습니다.' };
 });
 
 await server.connect(new StdioServerTransport());
