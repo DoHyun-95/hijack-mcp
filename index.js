@@ -89,7 +89,7 @@ const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'YYYY-MM-DD 형식이
 // MCP 서버
 // ─────────────────────────────────────────────
 const server = new McpServer(
-    { name: 'hijack', version: '0.9.0' },
+    { name: 'hijack', version: '1.0.0' },
     {
         instructions: [
             '하이잭 학원 사이트의 학생 데이터(출결, 과제, 영상 시청, OMR 성적, 상담기록)를 조회하고 학생 리포트 초안을 작성하며, OMR 시험(정답)을 등록하고 게시판·수업 일정·출결·과제·팝업·메인 디자인을 관리하는 도구입니다.',
@@ -99,7 +99,7 @@ const server = new McpServer(
             '시험 성적은 analysis.omr_boards(시험 종류=게시판별)로 보세요. 같은 종류끼리만 비교하고, 서로 다른 종류(예: 모의고사와 단어 테스트)의 점수를 섞어 평균 내거나 비교하지 마세요. 실력 추이는 1차 점수(first_avg) 기준이며, 재시험은 만회 폭(retake_gain)으로 따로 말하세요. metrics.omr_average는 종류가 섞인 값이라 쓰지 마세요.',
             'signals는 원장님·선생님용 정보입니다. 학부모용 총평에는 위험 신호를 그대로 쓰지 말고 개선 방향과 다음 계획으로 순화해 쓰세요.',
             'DATA_UNRECORDED 신호가 있으면 출석률을 신뢰하기 어려우니 출석에 대한 단정적인 평가를 피하세요.',
-            '리포트는 초안까지만 만들 수 있습니다. 발행·삭제·알림톡 발송은 원장님/선생님이 관리자 화면에서 직접 합니다.',
+            '리포트는 초안까지만 만들 수 있습니다. 발행과 알림톡 발송은 원장님/선생님이 관리자 화면에서 직접 합니다.',
             '상담기록은 민감정보이므로 사용자가 요청했을 때만 include_consultations=true로 조회하세요.',
             'OMR 시험(정답) 등록: PDF 등에서 정답을 추출해 list_omr_boards로 고른 이 사이트 전용 게시판에 create_omr_exams로 등록합니다.',
             '등록 순서는 반드시 ① create_omr_exams(dry_run=true)로 검증 → ② 회차별 정답표(번호: 정답)와 warnings/errors를 사용자에게 보여주고 확인받기 → ③ 사용자가 확인한 뒤에만 dry_run=false로 등록입니다. 확인 없이 등록하지 마세요.',
@@ -107,10 +107,10 @@ const server = new McpServer(
             '등록한 시험은 이 도구로 수정·삭제할 수 없습니다. 잘못 등록했다면 관리자 화면에서 직접 고치도록 안내하세요.',
             '선생님 질문 응답: 수업 일정·출결은 get_schedule → get_attendance, 과제는 list_assignments → get_assignment_status, 영상 시청은 get_video_watch, 반 시험 성적은 get_group_omr, 사이트 현황은 get_site_stats를 쓰세요. 반은 list_students의 groups(group_id, group_name)로 찾습니다.',
             '"안 한 학생"(결석·미제출·미시청) 질문은 대상 학생 목록(반 구성원·과제 대상자)과 기록을 비교해 답하세요. 기록이 없는 학생은 "기록 없음"으로 말하고 결석·미제출로 단정하지 마세요.',
-            '게시판 관리: list_boards로 현재 설정을 보고, create_board·update_board는 바꿀 내용(아이디·이름·권한 레벨·분류)을 사용자에게 보여주고 확인받은 뒤에만 호출하세요. 게시판 삭제·스킨 변경은 관리자 화면에서 직접 하도록 안내하세요.',
+            '게시판 관리: list_boards로 현재 설정을 보고, create_board·update_board는 바꿀 내용(아이디·이름·권한 레벨·분류)을 사용자에게 보여주고 확인받은 뒤에만 호출하세요. 스킨 변경은 관리자 화면에서 직접 하도록 안내하세요. 메뉴는 list_menus로 조회합니다.',
             '일정·출결·과제·팝업·메인 디자인 쓰기 도구도 실행 전에 바꿀 내용을 사용자에게 보여주고 확인받으세요. 출결 저장은 학부모 알림톡, 과제 생성·휴강은 학생 푸시가 관리자 화면과 똑같이 발송되므로 확인할 때 함께 알려주세요.',
             '삭제 도구(delete_*, 이미지 삭제)는 최고 관리자 계정의 "전체" 키로만 됩니다. 다른 키로 권한 오류가 나면 관리자 화면에서 직접 하도록 안내하세요.',
-            '삭제는 되돌릴 수 없습니다. 반드시 삭제할 대상(제목·날짜·게시판 이름 등)을 조회해 사용자에게 보여주고, 사용자가 명확히 삭제하라고 한 뒤에만 confirm=true로 호출하세요. 게시판 삭제는 그 안의 글도 모두 사라진다고 꼭 알리세요.',
+            '삭제는 되돌릴 수 없습니다. 반드시 삭제할 대상(제목·날짜·게시판 이름 등)을 조회해 사용자에게 보여주고, 사용자가 명확히 삭제하라고 한 뒤에만 confirm=true로 호출하세요. 게시판 삭제는 그 안의 글도 모두 사라진다고 꼭 알리세요. clear_board_posts는 게시판은 두고 글·첨부·시청/OMR 기록만 지우고, delete_menu는 하위 메뉴도 함께 지웁니다.',
             '도구로 확인할 수 없는 정보(결제·상담 등)는 추측하지 말고 관리자 화면에서 확인하도록 안내하세요.',
         ].join('\n'),
     },
@@ -655,6 +655,8 @@ registerTool('update_main_design', {
 });
 
 // ── 삭제 (최고 관리자 계정의 "전체" 키만. 되돌릴 수 없으므로 confirm=true 필수) ──
+// 기존 게시판 아이디에는 대문자가 있다 (예: Keystone_exam). 새로 만들 때만 소문자 규칙 적용
+const boTableSchema = z.string().regex(/^[A-Za-z0-9_]{1,20}$/, '영문·숫자·밑줄 20자 이내');
 registerTool('delete_schedule', {
     title: '수업 일정 삭제',
     description: '수업 일정(se_id)과 그 일정의 출결·과제 연결을 삭제합니다. future=true면 반복 일정에서 이 날 이후 같은 묶음을 모두 삭제합니다. 최고 관리자 "전체" 키만 가능합니다.',
@@ -694,10 +696,38 @@ registerTool('delete_report', {
 registerTool('delete_board', {
     title: '게시판 삭제',
     description: '게시판(bo_table)과 그 안의 모든 글을 삭제합니다(테이블 삭제, 복구 불가). 최고 관리자 "전체" 키만 가능하고, 서버에서 스키마 변경이 허용되어 있어야 합니다.',
-    inputSchema: { bo_table: z.string().regex(/^[a-z0-9_]{1,20}$/), confirm: confirmSchema },
+    inputSchema: { bo_table: boTableSchema, confirm: confirmSchema },
 }, async ({ bo_table }) => {
     await callApi('DELETE', 'boards.php', { query: { bo_table } });
     return { bo_table, message: '게시판을 삭제했습니다.' };
+});
+
+registerTool('clear_board_posts', {
+    title: '게시판 글 비우기',
+    description: '게시판(bo_table) 설정은 그대로 두고 글·댓글·첨부파일과 글에 연결된 기록(추천·조회·영상 시청·OMR 결과 등)을 모두 지웁니다. 글 번호는 1부터 다시 시작합니다. 복구 불가. 최고 관리자 "전체" 키만 가능합니다.',
+    inputSchema: { bo_table: boTableSchema, confirm: confirmSchema },
+}, async ({ bo_table }) => callApi('POST', 'boards.php', { query: { action: 'clear-posts', bo_table } }));
+
+registerTool('list_menus', {
+    title: '메뉴 목록',
+    description: '사이트 메뉴(main) 또는 OMR 메뉴(omr)를 조회합니다. me_code가 길수록 하위 메뉴입니다(앞부분이 상위 메뉴 코드).',
+    inputSchema: { type: z.enum(['main', 'omr']).optional().describe('기본 main') },
+}, async ({ type = 'main' }) => {
+    const data = await callApi('GET', 'menus.php', { query: { type: type === 'omr' ? 'omr' : undefined } });
+    return (data.flat || []).map(({ me_id, me_code, me_name, me_link, me_order, me_use }) => ({ me_id, me_code, me_name, me_link, me_order, me_use }));
+});
+
+registerTool('delete_menu', {
+    title: '메뉴 삭제',
+    description: '메뉴(me_code)와 그 하위 메뉴를 모두 삭제합니다. 메뉴가 가리키는 게시판은 지우지 않습니다. 최고 관리자 "전체" 키만 가능합니다.',
+    inputSchema: {
+        me_code: z.string().regex(/^[0-9A-Za-z]+$/).describe('list_menus의 me_code'),
+        type: z.enum(['main', 'omr']).optional().describe('기본 main'),
+        confirm: confirmSchema,
+    },
+}, async ({ me_code, type = 'main' }) => {
+    await callApi('DELETE', 'menus.php', { query: { me_code, delete_children: 1, type: type === 'omr' ? 'omr' : undefined } });
+    return { me_code, message: '메뉴와 하위 메뉴를 삭제했습니다.' };
 });
 
 await server.connect(new StdioServerTransport());

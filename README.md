@@ -105,10 +105,11 @@ Claude Desktop과 같은 `mcpServers` 형식으로 추가합니다.
 | create_assignment / update_assignment / close_assignment / set_assignment_completion | 과제 생성(학생 알림·푸시)·수정·종료, 학생별 완료 처리 |
 | list_popups / create_popup / update_popup | 팝업 조회, 내용(HTML)형 팝업 생성, 팝업 수정·켜기/끄기 |
 | get_main_design / update_main_design | 메인 디자인 조회, 기본 배너 표시·배너 링크·배경색 수정 |
-| delete_schedule / delete_assignment / delete_popup / delete_report / delete_board | 삭제 — **최고 관리자 계정의 전체 키만**, 사용자 확인 후 실행 |
+| list_menus | 사이트·OMR 메뉴 조회 |
+| delete_schedule / delete_assignment / delete_popup / delete_report / delete_board / delete_menu / clear_board_posts | 삭제·게시판 글 비우기 — **최고 관리자 계정의 전체 키만**, 사용자 확인 후 실행 |
 
 - 리포트 발행은 **할 수 없습니다.** 관리자 화면에서 직접 하세요.
-- 삭제(일정·과제·팝업·리포트·게시판, 팝업·배너 이미지)는 **최고 관리자 계정의 "전체" 키로만** 됩니다. 되돌릴 수 없으니 AI가 대상을 보여주고 확인받은 뒤 실행합니다. 게시판을 지우면 그 안의 글도 모두 사라집니다.
+- 삭제(일정·과제·팝업·리포트·게시판·메뉴, 팝업·배너 이미지)와 게시판 글 비우기는 **최고 관리자 계정의 "전체" 키로만** 됩니다. 되돌릴 수 없으니 AI가 대상을 보여주고 확인받은 뒤 실행합니다. 게시판을 지우면 그 안의 글도 모두 사라집니다.
 - 출결 저장·과제 생성·휴강은 관리자 화면과 똑같이 학부모 알림톡·학생 푸시가 나갑니다. 따로 보내는 알림톡 발송 기능은 없습니다.
 - 게시판 스킨·포인트·업로드 설정, 이미지 업로드(팝업·메인 배너)는 관리자 화면에서 하세요.
 - 등록한 OMR 시험의 수정·삭제와 본사 공용 게시판 등록은 **할 수 없습니다.**
