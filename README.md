@@ -1,22 +1,24 @@
-# 하이잭 학생 리포트 MCP
+# 하이잭 MCP
 
 Claude Desktop, Codex, Antigravity 같은 AI 도구에서 우리 학원 사이트의 학생 데이터를 조회·분석하고
-학생 리포트 **초안**을 작성하거나, PDF 정답지에서 **OMR 시험(정답)**을 등록할 수 있게 해주는 연결 프로그램입니다.
+학생 리포트 초안 작성, OMR 시험(정답) 등록, 수업 일정·출결·과제·게시판·팝업 관리를 할 수 있게 해주는 연결 프로그램입니다.
+
+> 이전 이름은 `hijack-report-mcp`입니다. 예전 주소로 받아도 이 저장소로 연결됩니다.
 
 ## 1. 준비물
 
 - **Node.js 18 이상** — https://nodejs.org 에서 LTS 버전 설치
-- **이 폴더** (`hijack-report-mcp`) — 예: `C:\hijack-report-mcp` 에 복사
+- **이 폴더** (`hijack-mcp`) — 예: `C:\hijack-mcp` 에 복사
 - **API 키** — 관리자 모드 > 사이트 설정 > **AI 연동 키**에서 발급
   - 조회: 데이터 조회·분석만
   - 초안: 리포트 초안 생성과 미발행 리포트 총평 수정까지
-  - 전체: 위 기능에 더해 OMR 시험(정답) 등록, 게시판 생성·설정 수정
-  - (이전에 발급한 "초안 + OMR 등록" 키는 게시판 생성·수정을 뺀 나머지가 그대로 됩니다)
+  - 전체: 위 기능에 더해 OMR 시험(정답) 등록, 게시판·수업 일정·출결·과제·팝업·메인 디자인 생성/수정
+  - (이전에 발급한 "초안 + OMR 등록" 키는 리포트 초안과 OMR 등록까지만 됩니다)
 
 폴더를 복사한 뒤 한 번만 실행하세요 (명령 프롬프트에서):
 
 ```
-cd C:\hijack-report-mcp
+cd C:\hijack-mcp
 npm install
 ```
 
@@ -32,9 +34,9 @@ npm install
 ```json
 {
   "mcpServers": {
-    "hijack-report": {
+    "hijack": {
       "command": "node",
-      "args": ["C:\\hijack-report-mcp\\index.js"],
+      "args": ["C:\\hijack-mcp\\index.js"],
       "env": {
         "HIJACK_SITE_URL": "https://우리학원주소",
         "HIJACK_API_KEY": "hjk_발급받은키"
@@ -51,9 +53,9 @@ npm install
 `%USERPROFILE%\.codex\config.toml`
 
 ```toml
-[mcp_servers.hijack-report]
+[mcp_servers.hijack]
 command = "node"
-args = ["C:\\hijack-report-mcp\\index.js"]
+args = ["C:\\hijack-mcp\\index.js"]
 env = { HIJACK_SITE_URL = "https://우리학원주소", HIJACK_API_KEY = "hjk_발급받은키" }
 ```
 
@@ -76,6 +78,9 @@ Claude Desktop과 같은 `mcpServers` 형식으로 추가합니다.
   → 정답표를 먼저 보여주고, 확인하면 등록합니다.
 - "학부모 공지 게시판 만들어줘. 읽기는 회원만, 글쓰기는 관리자만" (전체 키 필요)
 - "자료실 게시판에 분류 '중1, 중2, 중3' 추가해줘" (전체 키 필요)
+- "오늘 중2A 수업 김민수 지각, 나머지 출석으로 체크해줘" (전체 키 필요, 학부모 알림톡 발송)
+- "중2A에 금요일까지 단어 Day5 암기 과제 내줘" (전체 키 필요, 학생 푸시 발송)
+- "이번 주 금요일 중2A 수업 휴강 처리해줘" (전체 키 필요)
 
 ## 4. 할 수 있는 것 / 없는 것
 
@@ -95,9 +100,15 @@ Claude Desktop과 같은 `mcpServers` 형식으로 추가합니다.
 | create_omr_exams | OMR 시험(정답) 등록 — 먼저 검증만 하고, 확인 후 등록 |
 | list_boards | 게시판 목록·설정(그룹, 스킨, 권한 레벨, 분류) |
 | create_board / update_board | 게시판 생성(기본 스킨), 이름·순서·권한 레벨·분류·페이지당 글 수 수정 |
+| create_schedule / update_schedule / toggle_schedule_cancel | 수업 일정 생성·수정, 휴강/휴강 취소 |
+| save_attendance | 수업별 출결 저장 (학부모 알림톡 발송) |
+| create_assignment / update_assignment / close_assignment / set_assignment_completion | 과제 생성(학생 알림·푸시)·수정·종료, 학생별 완료 처리 |
+| list_popups / create_popup / update_popup | 팝업 조회, 내용(HTML)형 팝업 생성, 팝업 수정·켜기/끄기 |
+| get_main_design / update_main_design | 메인 디자인 조회, 기본 배너 표시·배너 링크·배경색 수정 |
 
-- 발행, 삭제(게시판 삭제 포함), 알림톡 발송은 **할 수 없습니다.** 관리자 화면에서 직접 하세요.
-- 게시판 스킨·포인트·업로드 설정은 관리자 화면에서 바꾸세요.
+- 발행과 삭제(게시판·일정·과제·팝업·이미지)는 **할 수 없습니다.** 관리자 화면에서 직접 하세요.
+- 출결 저장·과제 생성·휴강은 관리자 화면과 똑같이 학부모 알림톡·학생 푸시가 나갑니다. 따로 보내는 알림톡 발송 기능은 없습니다.
+- 게시판 스킨·포인트·업로드 설정, 이미지 업로드(팝업·메인 배너)는 관리자 화면에서 하세요.
 - 등록한 OMR 시험의 수정·삭제와 본사 공용 게시판 등록은 **할 수 없습니다.**
 - 상담기록은 요청할 때만 조회합니다. 결제 정보는 조회할 수 없습니다.
 - 조회 결과는 키를 발급한 관리자의 메뉴 권한 범위 안에서만 나옵니다.
@@ -115,4 +126,4 @@ Claude Desktop과 같은 `mcpServers` 형식으로 추가합니다.
 | HIJACK_API_KEY가 올바르지 않습니다 | 키를 `hjk_`부터 빠짐없이 복사했는지 확인 |
 | 사이트가 ...(으)로 이동합니다 | 안내된 주소로 `HIJACK_SITE_URL` 변경 (www, https 차이) |
 | 유효하지 않거나 폐기된 API 키입니다 | 관리자 화면에서 새 키 발급 |
-| API 키 권한으로 허용되지 않는 작업입니다 | 초안 작성은 "초안" 키, OMR 등록·게시판 생성/수정은 "전체" 키 필요. 발행된 리포트는 수정 불가 |
+| API 키 권한으로 허용되지 않는 작업입니다 | 초안 작성은 "초안" 키, 그 밖의 등록·생성·수정은 "전체" 키 필요. 발행된 리포트는 수정 불가 |

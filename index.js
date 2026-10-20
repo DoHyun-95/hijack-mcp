@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 하이잭 학생 리포트 MCP 서버 (stdio)
+ * 하이잭 MCP 서버 (stdio)
  *
  * 환경변수
  *   HIJACK_SITE_URL  학원 사이트 주소 (예: https://academy.example.com)
@@ -18,18 +18,18 @@ const REQUEST_TIMEOUT_MS = 30_000;
 const BASE_SECTIONS = ['schedule', 'assignments', 'video', 'omr'];
 
 if (!/^https?:\/\/[^/\s]+$/.test(SITE_URL)) {
-    console.error('[hijack-report-mcp] HIJACK_SITE_URL이 올바르지 않습니다. 예: https://academy.example.com');
+    console.error('[hijack-mcp] HIJACK_SITE_URL이 올바르지 않습니다. 예: https://academy.example.com');
     process.exit(1);
 }
 if (!/^hjk_[0-9a-f]{48}$/.test(API_KEY)) {
-    console.error('[hijack-report-mcp] HIJACK_API_KEY가 올바르지 않습니다. 관리자 모드 > 사이트 설정 > AI 연동 키에서 발급하세요.');
+    console.error('[hijack-mcp] HIJACK_API_KEY가 올바르지 않습니다. 관리자 모드 > 사이트 설정 > AI 연동 키에서 발급하세요.');
     process.exit(1);
 }
 
 // ─────────────────────────────────────────────
 // 사이트 관리자 API 호출
 // ─────────────────────────────────────────────
-async function callApi(method, path, { query = {}, body } = {}) {
+async function callApi(method, path, { query = {}, body, form } = {}) {
     const url = new URL(`/api/admin/${path}`, SITE_URL);
     for (const [k, v] of Object.entries(query)) {
         if (v !== undefined && v !== null && v !== '') url.searchParams.set(k, String(v));
@@ -41,10 +41,11 @@ async function callApi(method, path, { query = {}, body } = {}) {
             method,
             headers: {
                 'X-API-Key': API_KEY,
-                'Content-Type': 'application/json',
+                // $_POST로 받는 API(팝업·메인 디자인)는 form으로 보낸다
+                'Content-Type': form ? 'application/x-www-form-urlencoded' : 'application/json',
                 Accept: 'application/json',
             },
-            body: body ? JSON.stringify(body) : undefined,
+            body: form ? new URLSearchParams(form) : body ? JSON.stringify(body) : undefined,
             // 리다이렉트를 따라가면 키가 다른 주소로 전송될 수 있어 막는다
             redirect: 'manual',
             signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
@@ -88,10 +89,10 @@ const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'YYYY-MM-DD 형식이
 // MCP 서버
 // ─────────────────────────────────────────────
 const server = new McpServer(
-    { name: 'hijack-report', version: '0.6.0' },
+    { name: 'hijack', version: '0.8.0' },
     {
         instructions: [
-            '하이잭 학원 사이트의 학생 데이터(출결, 과제, 영상 시청, OMR 성적, 상담기록)를 조회하고 학생 리포트 초안을 작성하며, OMR 시험(정답)을 등록하고 게시판을 관리하는 도구입니다.',
+            '하이잭 학원 사이트의 학생 데이터(출결, 과제, 영상 시청, OMR 성적, 상담기록)를 조회하고 학생 리포트 초안을 작성하며, OMR 시험(정답)을 등록하고 게시판·수업 일정·출결·과제·팝업·메인 디자인을 관리하는 도구입니다.',
             '학생을 지정할 때는 먼저 list_students로 mb_id를 확인하세요.',
             '학생 데이터 응답의 analysis 블록을 먼저 보세요: metrics(지표별 이번/이전 기간 값과 변화량), signals(위험 신호), highlights(잘한 점), overall(good=순조로움, watch=점검 권장, alert=관심 필요).',
             '분석·총평에 쓰는 숫자는 analysis와 응답 데이터에 있는 값만 인용하고, 직접 계산하거나 추정하지 마세요.',
@@ -107,6 +108,8 @@ const server = new McpServer(
             '선생님 질문 응답: 수업 일정·출결은 get_schedule → get_attendance, 과제는 list_assignments → get_assignment_status, 영상 시청은 get_video_watch, 반 시험 성적은 get_group_omr, 사이트 현황은 get_site_stats를 쓰세요. 반은 list_students의 groups(group_id, group_name)로 찾습니다.',
             '"안 한 학생"(결석·미제출·미시청) 질문은 대상 학생 목록(반 구성원·과제 대상자)과 기록을 비교해 답하세요. 기록이 없는 학생은 "기록 없음"으로 말하고 결석·미제출로 단정하지 마세요.',
             '게시판 관리: list_boards로 현재 설정을 보고, create_board·update_board는 바꿀 내용(아이디·이름·권한 레벨·분류)을 사용자에게 보여주고 확인받은 뒤에만 호출하세요. 게시판 삭제·스킨 변경은 관리자 화면에서 직접 하도록 안내하세요.',
+            '일정·출결·과제·팝업·메인 디자인 쓰기 도구도 실행 전에 바꿀 내용을 사용자에게 보여주고 확인받으세요. 출결 저장은 학부모 알림톡, 과제 생성·휴강은 학생 푸시가 관리자 화면과 똑같이 발송되므로 확인할 때 함께 알려주세요.',
+            '삭제(일정·과제·팝업·이미지)는 이 도구로 할 수 없습니다. 관리자 화면에서 직접 하도록 안내하세요.',
             '도구로 확인할 수 없는 정보(결제·상담 등)는 추측하지 말고 관리자 화면에서 확인하도록 안내하세요.',
         ].join('\n'),
     },
@@ -415,5 +418,232 @@ registerTool('update_board', {
     return { bo_table, changed: body, message: '게시판 설정을 수정했습니다.' };
 });
 
+// ── 일정·출결·과제·팝업·메인 디자인 쓰기 ("전체" 권한 키. 삭제는 관리자 화면에서만) ──
+// 서버 수정 API는 보낸 값으로 전체를 덮어쓰므로, 기존 값을 읽어 바꿀 항목만 합친다.
+const timeSchema = z.string().regex(/^\d{2}:\d{2}$/, 'HH:MM 형식이어야 합니다.');
+const dateTimeSchema = z.string().regex(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}(:\d{2})?$/, 'YYYY-MM-DD HH:MM 형식이어야 합니다.');
+const defined = (obj) => Object.fromEntries(Object.entries(obj).filter(([, v]) => v !== undefined));
+
+const scheduleFields = {
+    title: z.string().min(1).max(200).optional().describe('수업 제목'),
+    group: z.string().optional().describe('반 이름 (list_students의 group_name)'),
+    start_time: timeSchema.optional(),
+    end_time: timeSchema.optional(),
+    memo: z.string().optional().describe('메모'),
+    color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional().describe('표시 색 (#3b82f6)'),
+    is_public: z.boolean().optional().describe('학생에게 공개 (기본 true)'),
+};
+const toScheduleBody = ({ title, group, start_time, end_time, memo, color, is_public, date }) => defined({
+    se_title: title, se_group: group, se_start_time: start_time, se_end_time: end_time,
+    se_memo: memo, se_color: color, se_is_public: is_public === undefined ? undefined : Number(is_public), se_date: date,
+});
+
+registerTool('create_schedule', {
+    title: '수업 일정 만들기',
+    description: '수업 일정 한 건을 만듭니다. 만들기 전에 날짜·시간·반·제목을 사용자에게 확인받으세요. "전체" 권한 키가 필요합니다.',
+    inputSchema: { date: dateSchema, ...scheduleFields, title: z.string().min(1).max(200).describe('수업 제목') },
+}, async (args) => callApi('POST', 'schedule.php', { body: toScheduleBody(args) }));
+
+registerTool('update_schedule', {
+    title: '수업 일정 수정',
+    description: '수업 일정(se_id)을 수정합니다. 준 항목만 바뀝니다. future=true면 반복 일정에서 이 날 이후 같은 묶음을 모두 바꿉니다. 바꾸기 전에 사용자에게 확인받으세요. "전체" 권한 키가 필요합니다.',
+    inputSchema: {
+        se_id: z.number().int().min(1),
+        date: dateSchema.optional(),
+        ...scheduleFields,
+        future: z.boolean().optional().describe('반복 일정의 이후 일정까지 함께 수정'),
+    },
+}, async ({ se_id, future, ...changes }) => {
+    const { event } = await callApi('GET', 'schedule.php', { query: { action: 'event', id: se_id } });
+    const body = { ...event, ...toScheduleBody(changes) };
+    await callApi('PUT', 'schedule.php', { query: { id: se_id, scope: future ? 'future' : undefined }, body });
+    return { se_id, changed: toScheduleBody(changes), message: '일정을 수정했습니다.' };
+});
+
+registerTool('toggle_schedule_cancel', {
+    title: '휴강 / 휴강 취소',
+    description: '수업 일정을 휴강으로 바꾸거나, 이미 휴강이면 휴강을 취소합니다. 설정에 따라 학생에게 휴강 푸시 알림이 나갑니다. 실행 전에 사용자에게 확인받으세요. "전체" 권한 키가 필요합니다.',
+    inputSchema: {
+        se_id: z.number().int().min(1),
+        cancel_reason: z.string().optional().describe('휴강 사유'),
+    },
+}, async ({ se_id, cancel_reason }) => callApi('POST', 'schedule.php', {
+    query: { action: 'toggle-cancel', id: se_id }, body: defined({ cancel_reason }),
+}));
+
+registerTool('save_attendance', {
+    title: '출결 기록',
+    description: '수업(se_id)의 학생별 출결을 저장합니다. 이미 기록된 학생은 덮어씁니다. 저장하면 학부모에게 출결 알림톡이 발송됩니다(관리자 화면과 동일). 저장 전에 학생별 출결을 사용자에게 보여주고 확인받으세요. "전체" 권한 키가 필요합니다.',
+    inputSchema: {
+        se_id: z.number().int().min(1).describe('get_schedule의 se_id'),
+        records: z.array(z.object({
+            mb_id: z.string().min(1),
+            status: z.enum(['present', 'absent', 'late', 'excused']).describe('출석/결석/지각/사유결석'),
+            memo: z.string().optional(),
+        })).min(1),
+    },
+}, async ({ se_id, records }) => callApi('POST', 'schedule.php', {
+    query: { action: 'save-attendance' },
+    body: { se_id, records: records.map(({ mb_id, status, memo }) => ({ mb_id, sat_status: status, sat_memo: memo })) },
+}));
+
+const linkSchema = z.object({
+    title: z.string().min(1),
+    url: z.string().url().optional().describe('외부 링크'),
+    bo_table: z.string().optional().describe('게시글 링크: 게시판'),
+    wr_id: z.number().int().optional().describe('게시글 링크: 글 번호'),
+});
+const toLinks = (links) => links.map((l) => (l.url
+    ? { type: 'external', title: l.title, url: l.url }
+    : { type: 'board', title: l.title, bo_table: l.bo_table, wr_id: l.wr_id }));
+const assignmentFields = {
+    content: z.string().optional().describe('과제 설명'),
+    group: z.string().optional().describe('대상 반 이름'),
+    members: z.array(z.string().min(1)).optional().describe('대상 학생 mb_id 목록'),
+    checklist: z.array(z.string().min(1)).optional().describe('체크리스트 항목'),
+    links: z.array(linkSchema).optional().describe('첨부 링크 (url 또는 bo_table+wr_id)'),
+    notify: z.boolean().optional().describe('대상 학생에게 사이트 알림·푸시 발송'),
+};
+
+registerTool('create_assignment', {
+    title: '과제 만들기',
+    description: '과제를 만듭니다. 기본으로 대상 학생에게 사이트 알림과 푸시가 발송됩니다(notify=false로 끌 수 있음). 만들기 전에 제목·마감일·대상 학생을 사용자에게 확인받으세요. "전체" 권한 키가 필요합니다.',
+    inputSchema: {
+        title: z.string().min(1).max(255),
+        due_date: dateSchema.describe('마감일 YYYY-MM-DD'),
+        ...assignmentFields,
+        members: z.array(z.string().min(1)).min(1).describe('대상 학생 mb_id 목록 (반 전체면 list_students의 groups[].members)'),
+    },
+}, async ({ title, due_date, content, group, members, checklist = [], links = [], notify = true }) => callApi('POST', 'assignment.php', {
+    query: { action: 'create-assignment' },
+    body: {
+        as_title: title, as_due_date: due_date, as_content: content, as_student_group: group, as_members: members,
+        as_checklist: checklist.map((t) => ({ title: t })), as_links: toLinks(links),
+        notify_site: notify, notify_fcm: notify,
+    },
+}));
+
+registerTool('update_assignment', {
+    title: '과제 수정',
+    description: '과제(as_id)를 수정합니다. 준 항목만 바뀝니다. 수정 알림은 notify=true일 때만 발송됩니다. 바꾸기 전에 사용자에게 확인받으세요. "전체" 권한 키가 필요합니다.',
+    inputSchema: {
+        as_id: z.number().int().min(1),
+        title: z.string().min(1).max(255).optional(),
+        due_date: dateSchema.optional(),
+        ...assignmentFields,
+    },
+}, async ({ as_id, title, due_date, content, group, members, checklist, links, notify = false }) => {
+    const { assignments = [] } = await callApi('GET', 'assignment.php', { query: { action: 'assignments', as_id, per_page: 1 } });
+    const cur = assignments.find((a) => Number(a.as_id) === as_id);
+    if (!cur) throw new Error(`과제 ${as_id}를 찾을 수 없습니다.`);
+    await callApi('PUT', 'assignment.php', {
+        query: { action: 'update-assignment' },
+        body: {
+            as_id,
+            as_title: title ?? cur.as_title,
+            as_due_date: due_date ?? cur.as_due_date,
+            as_content: content ?? cur.as_content,
+            as_student_group: group ?? cur.as_student_group,
+            as_members: members ?? (cur.as_members || []).map((m) => m.mb_id),
+            as_checklist: checklist ? checklist.map((t) => ({ title: t })) : cur.as_checklist_arr,
+            as_links: links ? toLinks(links) : cur.as_links_arr,
+            as_status: cur.as_status,
+            notify_site: notify, notify_fcm: notify,
+        },
+    });
+    return { as_id, message: '과제를 수정했습니다.' };
+});
+
+registerTool('close_assignment', {
+    title: '과제 종료',
+    description: '과제를 종료(closed) 상태로 바꿉니다. 실행 전에 사용자에게 확인받으세요. "전체" 권한 키가 필요합니다.',
+    inputSchema: { as_id: z.number().int().min(1) },
+}, async ({ as_id }) => callApi('POST', 'assignment.php', { query: { action: 'close-assignment' }, body: { as_id } }));
+
+registerTool('set_assignment_completion', {
+    title: '과제 완료 처리',
+    description: '학생 한 명의 과제 완료 여부를 바꿉니다(체크리스트 전체 항목도 같이 바뀜). "전체" 권한 키가 필요합니다.',
+    inputSchema: {
+        as_id: z.number().int().min(1),
+        mb_id: z.string().min(1),
+        completed: z.boolean(),
+    },
+}, async (args) => callApi('POST', 'assignment.php', { query: { action: 'update-completion-status' }, body: args }));
+
+const popupFields = {
+    subject: z.string().min(1).max(255).optional().describe('팝업 제목 (관리용)'),
+    content: z.string().optional().describe('팝업 내용 (HTML)'),
+    link: z.string().optional().describe('클릭 시 이동할 주소'),
+    device: z.enum(['both', 'pc', 'mobile']).optional(),
+    begin_time: dateTimeSchema.optional().describe('노출 시작 YYYY-MM-DD HH:MM'),
+    end_time: dateTimeSchema.optional().describe('노출 종료 YYYY-MM-DD HH:MM'),
+    width: z.number().int().min(100).max(2000).optional(),
+    height: z.number().int().min(100).max(2000).optional(),
+    active: z.boolean().optional().describe('노출 여부'),
+};
+const toPopupForm = (p) => defined({
+    nw_subject: p.subject, nw_content: p.content, nw_link: p.link, nw_device: p.device,
+    nw_begin_time: p.begin_time, nw_end_time: p.end_time, nw_width: p.width, nw_height: p.height,
+    nw_status: p.active === undefined ? undefined : Number(p.active),
+});
+
+registerTool('list_popups', {
+    title: '팝업 목록',
+    description: '사이트 팝업 목록(제목, 유형, 노출 기간, 활성 여부)을 조회합니다.',
+    inputSchema: {},
+}, async () => (await callApi('GET', 'popup.php', { query: { action: 'list' } }) || []).map((p) => ({ ...p, nw_content: clip(p.nw_content, 500) })));
+
+registerTool('create_popup', {
+    title: '팝업 만들기',
+    description: '내용(HTML)형 팝업을 만듭니다. 이미지형 팝업은 관리자 화면에서 만드세요. 만들기 전에 제목·내용·노출 기간을 사용자에게 확인받으세요. "전체" 권한 키가 필요합니다.',
+    inputSchema: {
+        ...popupFields,
+        subject: z.string().min(1).max(255).describe('팝업 제목 (관리용)'),
+        content: z.string().min(1).describe('팝업 내용 (HTML)'),
+        begin_time: dateTimeSchema.describe('노출 시작 YYYY-MM-DD HH:MM'),
+        end_time: dateTimeSchema.describe('노출 종료 YYYY-MM-DD HH:MM'),
+    },
+}, async (args) => callApi('POST', 'popup.php', { query: { action: 'create' }, form: { nw_type: 'html', ...toPopupForm(args) } }));
+
+registerTool('update_popup', {
+    title: '팝업 수정',
+    description: '팝업(nw_id)의 제목·내용·링크·노출 기간·크기·활성 여부를 바꿉니다. 준 항목만 바뀌고 이미지는 그대로 둡니다. 바꾸기 전에 사용자에게 확인받으세요. "전체" 권한 키가 필요합니다.',
+    inputSchema: { nw_id: z.number().int().min(1), ...popupFields },
+}, async ({ nw_id, ...changes }) => {
+    const cur = await callApi('GET', 'popup.php', { query: { action: 'detail', id: nw_id } });
+    const keep = ['nw_type', 'nw_subject', 'nw_content', 'nw_link', 'nw_device', 'nw_begin_time', 'nw_end_time', 'nw_left',
+        'nw_top', 'nw_width', 'nw_height', 'nw_new_window', 'nw_show_logged_in', 'nw_disable_options', 'nw_status'];
+    const form = { ...defined(Object.fromEntries(keep.map((k) => [k, cur[k] ?? undefined]))), ...toPopupForm(changes) };
+    await callApi('POST', 'popup.php', { query: { action: 'update', id: nw_id }, form });
+    return { nw_id, changed: toPopupForm(changes), message: '팝업을 수정했습니다.' };
+});
+
+registerTool('get_main_design', {
+    title: '메인 페이지 디자인',
+    description: '메인 페이지 배너 이미지 파일명, 링크, 배경색, HIJACK 기본 배너 표시 여부를 조회합니다.',
+    inputSchema: {},
+}, async () => callApi('GET', 'main-page-design.php'));
+
+registerTool('update_main_design', {
+    title: '메인 페이지 디자인 수정',
+    description: '메인 페이지의 HIJACK 기본 배너 표시, 배너 링크, 배경색을 바꿉니다. 준 항목만 바뀝니다. 이미지 업로드·삭제는 관리자 화면에서 하세요. 바꾸기 전에 사용자에게 확인받으세요. "전체" 권한 키가 필요합니다.',
+    inputSchema: {
+        default_banner: z.boolean().optional().describe('HIJACK 기본 배너 표시'),
+        link_1: z.string().optional(), link_2: z.string().optional(),
+        link_1_mobile: z.string().optional(), link_2_mobile: z.string().optional(),
+        background_1: z.string().optional().describe('배너 1 배경색 (#ffffff)'),
+        background_2: z.string().optional().describe('배너 2 배경색'),
+    },
+}, async (a) => {
+    const form = defined({
+        main_default_banner: a.default_banner === undefined ? undefined : (a.default_banner ? '1' : '0'),
+        main_link_1: a.link_1, main_link_2: a.link_2, main_link_1_mobile: a.link_1_mobile, main_link_2_mobile: a.link_2_mobile,
+        main_background_1: a.background_1, main_background_2: a.background_2,
+    });
+    if (Object.keys(form).length === 0) throw new Error('바꿀 항목을 하나 이상 주세요.');
+    await callApi('POST', 'main-page-design-update.php', { form });
+    return { changed: form, message: '메인 페이지 디자인을 수정했습니다.' };
+});
+
 await server.connect(new StdioServerTransport());
-console.error(`[hijack-report-mcp] ${SITE_URL} 연결 준비 완료`);
+console.error(`[hijack-mcp] ${SITE_URL} 연결 준비 완료`);
