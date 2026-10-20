@@ -88,10 +88,10 @@ const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'YYYY-MM-DD 형식이
 // MCP 서버
 // ─────────────────────────────────────────────
 const server = new McpServer(
-    { name: 'hijack-report', version: '0.5.0' },
+    { name: 'hijack-report', version: '0.6.0' },
     {
         instructions: [
-            '하이잭 학원 사이트의 학생 데이터(출결, 과제, 영상 시청, OMR 성적, 상담기록)를 조회하고 학생 리포트 초안을 작성하며, OMR 시험(정답)을 등록하는 도구입니다.',
+            '하이잭 학원 사이트의 학생 데이터(출결, 과제, 영상 시청, OMR 성적, 상담기록)를 조회하고 학생 리포트 초안을 작성하며, OMR 시험(정답)을 등록하고 게시판을 관리하는 도구입니다.',
             '학생을 지정할 때는 먼저 list_students로 mb_id를 확인하세요.',
             '학생 데이터 응답의 analysis 블록을 먼저 보세요: metrics(지표별 이번/이전 기간 값과 변화량), signals(위험 신호), highlights(잘한 점), overall(good=순조로움, watch=점검 권장, alert=관심 필요).',
             '분석·총평에 쓰는 숫자는 analysis와 응답 데이터에 있는 값만 인용하고, 직접 계산하거나 추정하지 마세요.',
@@ -106,6 +106,7 @@ const server = new McpServer(
             '등록한 시험은 이 도구로 수정·삭제할 수 없습니다. 잘못 등록했다면 관리자 화면에서 직접 고치도록 안내하세요.',
             '선생님 질문 응답: 수업 일정·출결은 get_schedule → get_attendance, 과제는 list_assignments → get_assignment_status, 영상 시청은 get_video_watch, 반 시험 성적은 get_group_omr, 사이트 현황은 get_site_stats를 쓰세요. 반은 list_students의 groups(group_id, group_name)로 찾습니다.',
             '"안 한 학생"(결석·미제출·미시청) 질문은 대상 학생 목록(반 구성원·과제 대상자)과 기록을 비교해 답하세요. 기록이 없는 학생은 "기록 없음"으로 말하고 결석·미제출로 단정하지 마세요.',
+            '게시판 관리: list_boards로 현재 설정을 보고, create_board·update_board는 바꿀 내용(아이디·이름·권한 레벨·분류)을 사용자에게 보여주고 확인받은 뒤에만 호출하세요. 게시판 삭제·스킨 변경은 관리자 화면에서 직접 하도록 안내하세요.',
             '도구로 확인할 수 없는 정보(결제·상담 등)는 추측하지 말고 관리자 화면에서 확인하도록 안내하세요.',
         ].join('\n'),
     },
@@ -179,7 +180,7 @@ registerTool('get_report', {
 
 registerTool('create_report_draft', {
     title: '리포트 초안 만들기',
-    description: '학생 리포트를 초안(draft) 상태로 만듭니다. 발행은 관리자 화면에서 사람이 합니다. "초안 작성" 권한 키가 필요합니다.',
+    description: '학생 리포트를 초안(draft) 상태로 만듭니다. 발행은 관리자 화면에서 사람이 합니다. "초안" 이상 권한 키가 필요합니다.',
     inputSchema: {
         mb_id: z.string().min(1),
         period_from: dateSchema,
@@ -197,7 +198,7 @@ registerTool('create_report_draft', {
 
 registerTool('update_report_draft', {
     title: '리포트 초안 총평 수정',
-    description: '초안 상태 리포트의 총평(과 제목)을 수정합니다. 발행된 리포트는 수정할 수 없습니다. "초안 작성" 권한 키가 필요합니다.',
+    description: '초안 상태 리포트의 총평(과 제목)을 수정합니다. 발행된 리포트는 수정할 수 없습니다. "초안" 이상 권한 키가 필요합니다.',
     inputSchema: {
         rp_id: z.number().int().min(1),
         teacher_comment: z.string().min(1).describe('새 총평 전체 내용 (기존 총평을 대체)'),
@@ -241,7 +242,7 @@ const examSchema = z.object({
 
 registerTool('create_omr_exams', {
     title: 'OMR 시험(정답) 등록',
-    description: 'OMR 게시판에 시험을 정답과 함께 등록합니다(최대 50개). 기본은 dry_run=true로 저장 없이 검증만 합니다. 사용자가 검증 결과(정답표)를 확인한 뒤에만 dry_run=false로 실제 등록하세요. "초안 + OMR 등록" 권한 키가 필요합니다.',
+    description: 'OMR 게시판에 시험을 정답과 함께 등록합니다(최대 50개). 기본은 dry_run=true로 저장 없이 검증만 합니다. 사용자가 검증 결과(정답표)를 확인한 뒤에만 dry_run=false로 실제 등록하세요. "전체" 권한 키(또는 이전에 발급한 "초안 + OMR 등록" 키)가 필요합니다.',
     inputSchema: {
         bo_table: z.string().min(1).describe('list_omr_boards로 확인한 게시판'),
         exams: z.array(examSchema).min(1).max(50),
@@ -340,6 +341,79 @@ registerTool('get_site_stats', {
     description: '전체 회원 수, 게시글 수, 오늘/누적 방문자, 최근 가입자·게시글 등 사이트 대시보드 통계를 조회합니다.',
     inputSchema: {},
 }, async () => callApi('GET', 'stats.php', { query: { type: 'dashboard' } }));
+
+// ── 게시판 관리 (조회는 모든 키, 생성·수정은 "전체" 권한 키. 삭제는 관리자 화면에서만) ──
+const levelSchema = z.number().int().min(1).max(10);
+const boardSettingsSchema = {
+    bo_subject: z.string().min(1).max(255).optional().describe('게시판 이름'),
+    bo_order: z.number().int().optional().describe('출력 순서 (작을수록 앞)'),
+    bo_list_level: levelSchema.optional().describe('목록 보기 레벨 (1=비회원 ~ 10=관리자)'),
+    bo_read_level: levelSchema.optional().describe('글 읽기 레벨'),
+    bo_write_level: levelSchema.optional().describe('글쓰기 레벨'),
+    bo_comment_level: levelSchema.optional().describe('댓글 쓰기 레벨'),
+    bo_reply_level: levelSchema.optional().describe('답변 쓰기 레벨'),
+    bo_use_category: z.boolean().optional().describe('분류 사용 여부'),
+    categories: z.array(z.string().min(1)).optional().describe('분류 목록 (예: ["공지","자료"])'),
+    bo_page_rows: z.number().int().min(1).max(100).optional().describe('한 페이지 글 수'),
+};
+
+function toBoardBody({ bo_use_category, categories, ...rest }) {
+    const body = { ...rest };
+    if (bo_use_category !== undefined) body.bo_use_category = bo_use_category ? 1 : 0;
+    if (categories !== undefined) body.bo_category_list = categories.join('|');
+    return body;
+}
+
+const pickBoard = (b) => ({
+    bo_table: b.bo_table, bo_subject: b.bo_subject, gr_id: b.gr_id, gr_name: b.gr_name, bo_skin: b.bo_skin,
+    bo_order: b.bo_order, bo_list_level: b.bo_list_level, bo_read_level: b.bo_read_level,
+    bo_write_level: b.bo_write_level, bo_comment_level: b.bo_comment_level, bo_reply_level: b.bo_reply_level,
+    bo_use_category: Number(b.bo_use_category) === 1,
+    categories: (b.bo_category_list || '').split('|').filter(Boolean),
+    bo_page_rows: b.bo_page_rows, bo_count_write: b.bo_count_write,
+});
+
+registerTool('list_boards', {
+    title: '게시판 목록',
+    description: '게시판 목록과 주요 설정(이름, 그룹, 스킨, 권한 레벨, 분류)을 조회합니다. bo_table을 주면 그 게시판 한 개만 봅니다.',
+    inputSchema: {
+        bo_table: z.string().optional().describe('게시판 아이디 (생략하면 전체 목록)'),
+        search: z.string().optional().describe('게시판 아이디/이름 검색'),
+    },
+}, async ({ bo_table, search }) => {
+    if (bo_table) return pickBoard(await callApi('GET', 'boards.php', { query: { bo_table } }));
+    const data = await callApi('GET', 'boards.php', { query: { search } });
+    const boards = (data.boards || []).map(pickBoard);
+    return { total: boards.length, boards };
+});
+
+registerTool('create_board', {
+    title: '게시판 만들기',
+    description: '새 게시판을 만듭니다(기본 스킨). 만들기 전에 아이디·이름·권한 레벨을 사용자에게 보여주고 확인받으세요. "전체" 권한 키가 필요합니다.',
+    inputSchema: {
+        bo_table: z.string().regex(/^[a-z0-9_]{1,20}$/, '영문 소문자·숫자·밑줄 20자 이내').describe('게시판 아이디 (생성 후 변경 불가)'),
+        gr_id: z.string().optional().describe('게시판 그룹 (list_boards의 gr_id, 기본 community)'),
+        ...boardSettingsSchema,
+        bo_subject: z.string().min(1).max(255).describe('게시판 이름'),
+    },
+}, async (args) => {
+    const data = await callApi('POST', 'boards.php', { body: toBoardBody(args) });
+    return { bo_table: data.bo_table, bo_subject: data.bo_subject, message: '게시판을 만들었습니다. 스킨 등 세부 설정은 관리자 화면에서 바꿀 수 있습니다.' };
+});
+
+registerTool('update_board', {
+    title: '게시판 설정 수정',
+    description: '게시판 이름·순서·권한 레벨·분류·페이지당 글 수를 바꿉니다. 준 항목만 바뀝니다. 바꾸기 전에 현재 값(list_boards)과 바꿀 값을 사용자에게 보여주고 확인받으세요. "전체" 권한 키가 필요합니다.',
+    inputSchema: {
+        bo_table: z.string().min(1).describe('수정할 게시판 아이디'),
+        ...boardSettingsSchema,
+    },
+}, async ({ bo_table, ...settings }) => {
+    const body = toBoardBody(settings);
+    if (Object.keys(body).length === 0) throw new Error('바꿀 설정을 하나 이상 주세요.');
+    await callApi('PUT', 'boards.php', { query: { bo_table }, body });
+    return { bo_table, changed: body, message: '게시판 설정을 수정했습니다.' };
+});
 
 await server.connect(new StdioServerTransport());
 console.error(`[hijack-report-mcp] ${SITE_URL} 연결 준비 완료`);
